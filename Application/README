@@ -1,0 +1,23 @@
+
+############################################## ENDPOINT ##############################################
+
+Para correr la aplicacion en docker:
+1) docker build -t keras_flask_app .
+2) docker run -it --rm -p 5000:5000 keras_flask_app
+(puede requerir permisos de root)
+
+
+Para correr la aplicacion localmente:
+1) pip install -r requirements.txt
+2) python app.py
+
+...luego ir a http:127.0.0.1:5000
+
+En la carpeta Samples hay unos txt de ejemplo. La app leerá los textos y clasificará como spoiler/no spoiler cada frase.
+El output es una lista con tres elementos:
+
+1 - El texto original
+1 - Las frases clasificadas como spoilers. Vienen en forma enumerada con la frase y su score (se puede interpretar como la probabilidad de que dicha frase sea un spoiler)
+2 - El array con todos los scores (para inspección)
+
+

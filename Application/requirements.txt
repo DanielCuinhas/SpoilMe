@@ -1,0 +1,8 @@
+Flask==1.1.1
+numpy==1.16.4
+Keras==2.2.0
+h5py
+tensorflow==1.14.0
+pandas
+gevent
+unidecode
