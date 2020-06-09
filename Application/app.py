@@ -1,100 +1,116 @@
-from os import environ
-from pydoc import html
-from urllib.parse import parse_qs
-
-import pandas as pd
-import flask
-from flask import Flask, request, jsonify, render_template
-import pickle
-from gevent.pywsgi import WSGIServer
 import json
-import keras
-import tensorflow as tf
-from keras.models import model_from_json
-from pprint import pprint
-import numpy as np
+import logging
 import re
-import unidecode
 
+import keras
+import numpy as np
+import tensorflow as tf
+import unidecode
+from bs4 import BeautifulSoup
+from flask import Flask, request, jsonify
+from flask_cors import CORS
+from gevent.pywsgi import WSGIServer
 
 app = Flask(__name__)
+CORS(app)
+
 model = None
 graph = None
 
 with open('resources/config.json') as json_data_file:
     config = json.load(json_data_file)
-vocab_to_int=config['vocab2int']
-seq_length=config['max_len']
+vocab_to_int = config['vocab2int']
+seq_length = config['max_len']
 
-def clean_str(s):
-    s = unidecode.unidecode(s)
-    s = re.sub(r'\t','',s)
-    s = re.sub(r'\r','',s)
+original_texts = {}
+
+
+def clean_str(original_string):
+    s = unidecode.unidecode(original_string)
+    s = re.sub(r'\t', '', s)
+    s = re.sub(r'\r', '', s)
     s = s.lower()
-    s = re.sub(r'[^a-z0-9]',' ',s)
-    s = re.sub(r' +',' ',s)
-    return s.strip()
+    s = re.sub(r'[^a-z0-9]', ' ', s)
+    s = re.sub(r' +', ' ', s)
+    result = s.strip()
+    original_texts[result] = original_string
+    return result
 
 
-def pad_features(reviews_ints, seq_length):
-    features = np.zeros((len(reviews_ints), seq_length), dtype=int)
+def pad_features(reviews_ints, this_seq_length):
+    features = np.zeros((len(reviews_ints), this_seq_length), dtype=int)
     for i, row in enumerate(reviews_ints):
-        features[i, :len(row)] = np.array(row)[:seq_length]
+        features[i, :len(row)] = np.array(row)[:this_seq_length]
     return features
 
 
-def spoilme(text):
-    s = re.sub(r'\n','.',text)
+def spoil_me(data):
+    if type(data) != "string":
+        soup = BeautifulSoup(data)
+        for script in soup(["script", "style"]):
+            script.extract()
+        text = soup.getText()
+        logging.warning(text)
+    else:
+        text = data
+    s = re.sub(r'\n', '.', text)
     s = s.split('.')
     s = [clean_str(i) for i in s]
     s = [f for f in s if f]
-    s_ = [[vocab_to_int.get(j,1) for j in k.split()] for k in s]
-    s_ = pad_features(s_,seq_length)
+    s_ = [[vocab_to_int.get(j, 1) for j in k.split()] for k in s]
+    s_ = pad_features(s_, seq_length)
     predictions = model.predict(s_)
     predictions_ = [p[1] for p in predictions]
-    predictions_cat = predictions.argmax(axis=1)
+#    predictions_cat = predictions.argmax(axis=1)
     result = list(zip(s, predictions_))
-    spoilers = [r for r in result if r[1]>=0.5]
+    spoilers = [r for r in result if r[1] >= 0.5]
+    for i, val in enumerate(spoilers):
+        spoiler = spoilers[i]
+        spoilers[i] = (original_texts[spoiler[0]], spoiler[1])
+
     return text, list(enumerate(spoilers)), predictions
 
 
 def build_model():
-    model = keras.models.Sequential()
-    model.add(keras.layers.Embedding(len(vocab_to_int), 16))
-    model.add(keras.layers.GlobalAveragePooling1D())
-    model.add(keras.layers.Dense(16, activation='relu'))
-    model.add(keras.layers.Dense(2, activation='sigmoid'))
-    return model
+    built_model = keras.models.Sequential()
+    built_model.add(keras.layers.Embedding(len(vocab_to_int), 16))
+    built_model.add(keras.layers.GlobalAveragePooling1D())
+    built_model.add(keras.layers.Dense(16, activation='relu'))
+    built_model.add(keras.layers.Dense(2, activation='sigmoid'))
+    return built_model
 
 
 def load_model():
     global model
     global graph
-    global sess
-    model=build_model()
+    model = build_model()
     model.build(input_shape=(None, seq_length))
     model.load_weights('resources/model_weights.h5')
     graph = tf.get_default_graph()
     print('Model ready! Go to http://127.0.0.1:5000/')
 
-@app.route('/')
-def home():
-    return render_template('index.html')
 
-def serializeSpoiler(spoiler):
+def serialize_spoiler(spoiler):
     return str(spoiler[1][1]), spoiler[1][0]
 
-@app.route('/', methods=['GET', 'POST'])
+
+@app.route('/', methods=['POST'])
 def predict():
     if request.method == 'POST':
         with graph.as_default():
-            original_text, spoilers, all_predictions = spoilme(request.json["text"])
-            serializedSpoilers = list(map(serializeSpoiler, spoilers))
+            if request.headers['Content-Type'] == 'text/html':
+                original_text, spoilers, all_predictions = spoil_me(request.stream.read().decode("utf-8"))
 
-        return jsonify(serializedSpoilers)
+            elif request.headers['Content-Type'] == 'application/json':
+                original_text, spoilers, all_predictions = spoil_me(request.json["html"])
 
-    return "Send 'text'!"
-    
+            serialized_spoilers = list(map(serialize_spoiler, spoilers))
+
+        return jsonify(serialized_spoilers)
+
+    return "Send text!"
+
+
 if __name__ == "__main__":
     load_model()
     http_server = WSGIServer(('0.0.0.0', 5000), app)
