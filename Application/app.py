@@ -10,6 +10,8 @@ from bs4 import BeautifulSoup
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from gevent.pywsgi import WSGIServer
+import urllib.request
+
 
 app = Flask(__name__)
 CORS(app)
@@ -47,14 +49,13 @@ def pad_features(reviews_ints, this_seq_length):
 def spoil_me(data):
     if type(data) != "string":
         soup = BeautifulSoup(data)
-        for script in soup(["script", "style"]):
+        for script in soup(["script", "style", "meta"]):
             script.extract()
         text = soup.getText()
-        logging.warning(text)
     else:
         text = data
-    s = re.sub(r'\n', '.', text)
-    s = s.split('.')
+    s = re.sub(r'\n', '', text).replace(". ", "")
+    s = s.split('')
     s = [clean_str(i) for i in s]
     s = [f for f in s if f]
     s_ = [[vocab_to_int.get(j, 1) for j in k.split()] for k in s]
@@ -102,7 +103,16 @@ def predict():
                 original_text, spoilers, all_predictions = spoil_me(request.stream.read().decode("utf-8"))
 
             elif request.headers['Content-Type'] == 'application/json':
-                original_text, spoilers, all_predictions = spoil_me(request.json["html"])
+                args = request.json
+                if 'html' in args:
+                    html = request.json["html"]
+                    original_text, spoilers, all_predictions = spoil_me(html)
+                elif 'url' in args:
+                    url = request.json["url"]
+                    with urllib.request.urlopen(url) as response:
+                        original_text, spoilers, all_predictions = spoil_me(response.read())
+                else:
+                    return jsonify({"error": "No 'html' nor 'url' specified"}), 400
 
             serialized_spoilers = list(map(serialize_spoiler, spoilers))
 
