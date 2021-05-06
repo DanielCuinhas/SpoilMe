@@ -1,5 +1,5 @@
 Flask==1.1.1
-flask_cors==3.0.8
+flask_cors==3.0.9
 numpy==1.16.4
 Keras==2.2.0
 beautifulsoup4==4.9.1
